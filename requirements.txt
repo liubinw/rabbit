@@ -1,0 +1,4 @@
+
+dazbo_commons==0.1.5
+python-dotenv==1.0.1
+yt-dlp==2024.12.23
