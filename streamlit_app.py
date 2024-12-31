@@ -2,6 +2,10 @@ import streamlit as st
 import logging
 import dazbo_commons as dc
 import yt_dlp
+import os
+import tempfile
+import platform
+import subprocess
 
 # Setup logging
 APP_NAME="cloud_music"
@@ -12,6 +16,55 @@ def setup_logging():
     logger.debug("DEBUG level logging enabled.")
     return logger
 
+# utility functions
+def run_command(command):
+    """Run a shell command and print its output in real-time."""
+    process = subprocess.Popen(
+        command, 
+        shell=True, 
+        stdout=subprocess.PIPE, 
+        stderr=subprocess.PIPE
+    )
+    
+    # Read and print the output line by line
+    if process.stdout is not None:
+        for line in iter(process.stdout.readline, b''):
+            logger.info(line.decode().strip())
+        process.stdout.close()
+        
+    process.wait()
+    
+def install_software(appname: str):
+    os_name = platform.system()
+    logger.info(f"Installing {appname} on {os_name}...")
+    
+    # Mapping operating systems to their respective installation commands
+    command_map = {
+        "Windows": f"winget install {appname} --silent --no-upgrade",
+        "Linux": f"apt -qq -y install {appname}",
+        "Darwin": f"brew install {appname}"
+    }
+    command = command_map.get(os_name)
+    if command:
+        run_command(command)
+        logger.info(f"Done.")
+    else:
+        logger.error(f"Unsupported operating system: {os_name}")
+
+def check_installed(app_exec: str) -> bool:    
+    appname, *arg = app_exec.split()
+    arg = " ".join(arg)
+    logger.debug(f"Checking if {appname} is installed")
+    
+    try:
+        output = subprocess.check_output([appname, arg], stderr=subprocess.STDOUT)
+        logger.debug(f"{appname} version: {output.decode().strip()}")
+        logger.debug(f"{appname} is already installed.")
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        logger.debug(f"{appname} is not installed or absent from path.")
+        
+    return False
 
 def download_yt_video(url, output_path, download_video=False):
         try:            
@@ -53,6 +106,12 @@ def download_yt_video(url, output_path, download_video=False):
 logger = setup_logging()
 
 def setup_download():
+    apps = [ ("ffmpeg", "ffmpeg -version"),
+            ("flac", "flac --version") ]
+            
+    for app_install, app_exec in apps:
+        if not check_installed(app_exec):
+            install_software(app_install)
     locations = dc.get_locations(APP_NAME)
     for attribute, value in vars(locations).items():
         logger.debug(f"{attribute}: {value}")
