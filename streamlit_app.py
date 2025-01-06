@@ -7,6 +7,10 @@ import tempfile
 import platform
 import subprocess
 
+from pytubefix import YouTube
+import os
+from datetime import datetime
+
 # Setup logging
 APP_NAME="cloud_music"
 def setup_logging():    
@@ -101,7 +105,65 @@ def download_yt_video(url, output_path, download_video=False):
             logger.error(f"Error processing URL '{url}'.")
             logger.debug(f"The cause was: {e}") 
             return False, str(e), None
+
+def sanitize_filename(title):
+    """Create a safe filename from the video title"""
+    if not title:
+        return f"youtube_audio_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    # Remove invalid filename characters
+    invalid_chars = '<>:"/\\|?*'
+    for char in invalid_chars:
+        title = title.replace(char, '')
+    return title[:100].strip()
+
+def download_audio(url, output_path='downloads'):
+    """
+    Download audio from a YouTube video using PyTubeFix
     
+    Args:
+        url (str): YouTube video URL
+        output_path (str): Directory to save the audio file
+    """
+    try:
+        # Create output directory if it doesn't exist
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+            
+        # Initialize YouTube object
+        yt = YouTube(url)
+        print(f"Downloading from: {yt.title}")
+        
+        # Get the audio-only stream with the highest quality
+        audio_stream = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
+        
+        if not audio_stream:
+            print("No audio stream found")
+            #return None
+            return False, output_path, "No audio stream found"
+        
+        # Create safe filename
+        safe_title = sanitize_filename(yt.title)
+        
+        # Download the audio
+        print(f"Downloading audio stream ({audio_stream.abr})")
+        audio_file = audio_stream.download(output_path, filename=safe_title)
+        
+        # Rename to add proper extension (usually webm or mp4)
+        base, _ = os.path.splitext(audio_file)
+        new_file = f"{base}.{audio_stream.subtype}"
+        if os.path.exists(new_file):
+            os.remove(new_file)
+        os.rename(audio_file, new_file)
+        
+        print(f"Successfully downloaded audio to: {new_file}")
+        #return new_file
+        return True, output_path, None
+        
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+        #return None
+        return False, str(e), None
+
 
 logger = setup_logging()
 
@@ -139,11 +201,16 @@ def main():
             return
             
         with st.spinner("Processing..."):
-            success, video_path, audio_path = download_yt_video(
+            success, video_path, audio_path = download_audio(
                 youtube_url, 
-                output_dir, 
-                extract_video
+                output_dir
             )
+
+            #download_yt_video(
+            #    youtube_url, 
+            #    output_dir, 
+            #    extract_video
+            #)
             
             if success:
                 st.success("Download completed successfully!")
