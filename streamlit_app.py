@@ -10,10 +10,11 @@ import subprocess
 from pytubefix import YouTube
 import os
 from datetime import datetime
+import json
 
 # Setup logging
 APP_NAME="cloud_music"
-def setup_logging():    
+def setup_logging():
     logger = dc.retrieve_console_logger(APP_NAME)
     logger.setLevel(logging.DEBUG)
     logger.info("Logger initialised.")
@@ -124,28 +125,28 @@ def download_audio(url, output_path='downloads'):
         url (str): YouTube video URL
         output_path (str): Directory to save the audio file
     """
+    logger.info(f"Downloading audio from YouTube...{url}")
     try:
         # Create output directory if it doesn't exist
         if not os.path.exists(output_path):
             os.makedirs(output_path)
             
         # Initialize YouTube object
-        yt = YouTube(url)
-        print(f"Downloading from: {yt.title}")
+        yt = YouTube(url, use_oauth=True)
+        logger.info(f"Downloading from: {yt.title}")
         
         # Get the audio-only stream with the highest quality
         audio_stream = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
         
         if not audio_stream:
-            print("No audio stream found")
-            #return None
+            logger.error("No audio stream found")
             return False, output_path, "No audio stream found"
         
         # Create safe filename
         safe_title = sanitize_filename(yt.title)
         
         # Download the audio
-        print(f"Downloading audio stream ({audio_stream.abr})")
+        logger.info(f"Downloading audio stream ({audio_stream.abr})")
         audio_file = audio_stream.download(output_path, filename=safe_title)
         
         # Rename to add proper extension (usually webm or mp4)
@@ -155,13 +156,11 @@ def download_audio(url, output_path='downloads'):
             os.remove(new_file)
         os.rename(audio_file, new_file)
         
-        print(f"Successfully downloaded audio to: {new_file}")
-        #return new_file
+        logger.info(f"Successfully downloaded audio to: {new_file}")
         return True, output_path, None
         
     except Exception as e:
-        print(f"An error occurred: {str(e)}")
-        #return None
+        logger.error(f"An error occurred: {str(e)}")
         return False, str(e), None
 
 
@@ -180,47 +179,142 @@ def setup_download():
     output_locn = f"{locations.output_dir}/music_files"
     return output_locn
 
+def search_youtube(query):
+    try:
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'extract_flat': True,
+            'quiet': True,
+            'no_warnings': True,
+            'simulate': True,
+            'dump_single_json': True,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"ytsearch5:{query}", download=False)
+            if 'entries' in info:
+                return info['entries']
+            else:
+                return []
+    except Exception as e:
+        logger.error(f"Error searching YouTube: {e}")
+        return []
+
 def main():
     output_locn = setup_download()
 
     st.title("Cloud Music Collection")
-    st.write("Download and collect online music")
+    st.markdown("""
+        <style>
+            .download-section {
+                border: 1px solid #e0e0e0;
+                padding: 10px;
+                border-radius: 5px;
+                margin-bottom: 20px;
+            }
+            .search-section {
+                border: 1px solid #e0e0e0;
+                padding: 10px;
+                border-radius: 5px;
+            }
+            .stTextInput > div > div > input {
+                border: 1px solid #e0e0e0;
+                border-radius: 3px;
+            }
+            .stButton > button {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 3px;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="download-section">', unsafe_allow_html=True)
+    col1, col2 = st.columns([3, 1], gap="small")
+    with col1:
+        youtube_url = st.text_input("Enter YouTube URL:", label_visibility="visible")
+    with col2:
+        if st.button("Download", key="download_button"):
+            if youtube_url:
+                with st.spinner("Downloading..."):
+                    success, video_path, audio_path = download_audio(
+                        youtube_url,
+                        output_locn
+                    )
+                    if success:
+                        st.success("Download completed successfully!")
+                    else:
+                        st.error(f"Error: {video_path}")
+            else:
+                st.error("Please enter a YouTube URL")
+    st.markdown('</div>', unsafe_allow_html=True)
     
-    # Input for YouTube URL
-    youtube_url = st.text_input("Enter YouTube URL:")
+    st.markdown('<div class="search-section">', unsafe_allow_html=True)
+    search_query = st.text_input("Enter search query:")
+
+    if search_query:
+        with st.spinner("Searching..."):
+            search_results = search_youtube(search_query)
+            if search_results:
+                st.write("Search Results:")
+                selected_videos = []
+                col1, col2, col3, col4, col5, col6 = st.columns([1, 2, 2, 3, 2, 1])
+                with col1:
+                    st.write("No.")
+                with col2:
+                    st.write("Title")
+                with col3:
+                    st.write("ID")
+                with col4:
+                    st.write("URL")
+                with col5:
+                    st.write("Duration")
+                with col6:
+                    st.write("Select")
+                for i, result in enumerate(search_results):
+                    col1, col2, col3, col4, col5, col6 = st.columns([1, 2, 2, 3, 2, 1])
+                    with col1:
+                        st.write(f"{i+1}")
+                    with col2:
+                        st.write(result.get('title', 'N/A'))
+                    with col3:
+                        st.write(result.get('id', 'N/A'))
+                    with col4:
+                        st.write(result.get('url', 'N/A'))
+                    with col5:
+                        st.write(result.get('duration', 'N/A'))
+                    with col6:
+                        checkbox = st.checkbox("", key=f"checkbox_{i}")
+                        if checkbox:
+                            selected_videos.append(result)
+
+                if selected_videos:
+                    if st.button("Download Selected"):
+                        with st.spinner("Downloading selected videos..."):
+                            for video in selected_videos:
+                                url = video.get('url')
+                                if url:
+                                    st.write(f"The url is: {url}")
+                                    st.write(f"Downloading: {video.get('title', 'N/A')}")
+                                    success, video_path, audio_path = download_audio(
+                                        url,
+                                        output_locn
+                                    )
+                                    if success:
+                                        st.success(f"Downloaded: {video.get('title', 'N/A')}")
+                                    else:
+                                        st.error(f"Error downloading: {video.get('title', 'N/A')}. Error: {video_path}")
+                                else:
+                                    st.error(f"Error: Could not extract URL for {video.get('title', 'N/A')}")
+
+            else:
+                st.write("No results found.")
+    st.markdown('</div>', unsafe_allow_html=True)
     
     output_dir = output_locn
     
     # Option to extract audio
-    # extract_audio = st.checkbox("Extract audio from video")
     extract_video = False
-    
-    if st.button("Download"):
-        if not youtube_url:
-            st.error("Please enter a YouTube URL")
-            return
-            
-        with st.spinner("Processing..."):
-            success, video_path, audio_path = download_audio(
-                youtube_url, 
-                output_dir
-            )
-
-            #download_yt_video(
-            #    youtube_url, 
-            #    output_dir, 
-            #    extract_video
-            #)
-            
-            if success:
-                st.success("Download completed successfully!")
-                st.write(f"Video saved to: {video_path}")
-                
-                if audio_path:
-                    st.write(f"Audio saved to: {audio_path}")
-                    
-            else:
-                st.error(f"Error occurred: {video_path}")
                 
 if __name__ == "__main__":
     main()
